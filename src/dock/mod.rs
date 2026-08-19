@@ -1,12 +1,13 @@
-mod app;
+mod icon_button;
 mod indicator;
-mod launchable;
+mod layer_shell;
 
 use std::{fs::File, io::Read};
 
 use gtk::prelude::*;
-use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use relm4::prelude::*;
+
+use icon_button::Action;
 
 #[derive(serde::Deserialize, Clone)]
 struct Launchables {
@@ -19,9 +20,9 @@ pub struct DockModel {
     enabled: bool,
     visible: bool,
     #[tracker::do_not_track]
-    apps: AsyncFactoryVecDeque<app::AppModel>,
+    apps: AsyncFactoryVecDeque<icon_button::IconButtonModel>,
     #[tracker::do_not_track]
-    launchables: AsyncFactoryVecDeque<launchable::LaunchableModel>,
+    launchables: AsyncFactoryVecDeque<icon_button::IconButtonModel>,
     #[tracker::do_not_track]
     indicator: Controller<indicator::IndicatorModel>,
     #[tracker::do_not_track]
@@ -90,19 +91,23 @@ impl SimpleComponent for DockModel {
         let apps = AsyncFactoryVecDeque::builder()
             .launch(gtk::Box::default())
             .forward(sender.input_sender(), |msg| match msg {
-                app::Output::Focus(x) => Input::Focus(x),
+                icon_button::Output::Focus(x) => Input::Focus(x),
+                icon_button::Output::Launch(x) => Input::Launch(x),
             });
 
         let mut launchables = AsyncFactoryVecDeque::builder()
             .launch(gtk::Box::default())
             .forward(sender.input_sender(), |msg| match msg {
-                launchable::Output::Launch(x) => Input::Launch(x),
+                icon_button::Output::Focus(x) => Input::Focus(x),
+                icon_button::Output::Launch(x) => Input::Launch(x),
             });
         if let Some(x) = load_launchables() {
             for (i, y) in x.icons.iter().enumerate() {
-                launchables
-                    .guard()
-                    .push_back((y.to_owned(), x.commands[i].clone()));
+                launchables.guard().push_back((
+                    y.to_owned(),
+                    Action::Launch(x.commands[i].clone()),
+                    false,
+                ));
             }
         }
 
@@ -130,16 +135,7 @@ impl SimpleComponent for DockModel {
         let launchables_box = model.launchables.widget();
         let widgets = view_output!();
 
-        widgets.window.init_layer_shell();
-        widgets.window.set_layer(Layer::Top);
-        for (anchor, state) in [
-            (Edge::Left, false),
-            (Edge::Right, false),
-            (Edge::Top, false),
-            (Edge::Bottom, true),
-        ] {
-            widgets.window.set_anchor(anchor, state);
-        }
+        layer_shell::anchor_bottom(&widgets.window);
 
         sender.input(Input::Init);
         let sender = sender.clone();
@@ -197,7 +193,11 @@ impl SimpleComponent for DockModel {
                     let mut guard = self.apps.guard();
                     guard.clear();
                     for w in windows {
-                        guard.push_back((w.id, icon_name_for_app_id(&w.app_id), w.focused));
+                        guard.push_back((
+                            icon_name_for_app_id(&w.app_id),
+                            Action::Focus(w.id),
+                            w.focused,
+                        ));
                     }
                 }
             }

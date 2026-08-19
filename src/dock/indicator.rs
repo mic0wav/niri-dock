@@ -1,6 +1,7 @@
 use gtk::prelude::*;
-use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use relm4::prelude::*;
+
+use super::layer_shell;
 
 pub struct IndicatorModel {
     visible: bool,
@@ -49,16 +50,7 @@ impl SimpleComponent for IndicatorModel {
         let model = IndicatorModel { visible: true };
         let widgets = view_output!();
 
-        widgets.window.init_layer_shell();
-        widgets.window.set_layer(Layer::Top);
-        for (anchor, state) in [
-            (Edge::Left, false),
-            (Edge::Right, false),
-            (Edge::Top, false),
-            (Edge::Bottom, true),
-        ] {
-            widgets.window.set_anchor(anchor, state);
-        }
+        layer_shell::anchor_bottom(&widgets.window);
 
         ComponentParts { model, widgets }
     }

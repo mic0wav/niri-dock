@@ -25,6 +25,14 @@ pub struct WindowInfo {
     pub focused: bool,
 }
 
+#[derive(Debug, Clone)]
+pub enum NiriEvent {
+    WindowsChanged(Vec<WindowInfo>),
+    WindowOpenedOrChanged(WindowInfo),
+    WindowClosed(u64),
+    WindowFocusChanged(Option<u64>),
+}
+
 pub async fn send_request(request: Value) -> Result<Value, Box<dyn std::error::Error>> {
     let mut stream = connect().await?;
 
@@ -51,26 +59,7 @@ pub async fn get_windows() -> Result<Vec<WindowInfo>, Box<dyn std::error::Error>
         .and_then(|v| v.get("Windows"))
         .and_then(|v| v.as_array())
     {
-        let mut window_list = Vec::new();
-        for window in windows {
-            if let (Some(id), Some(title), Some(app_id), Some(focused)) = (
-                window.get("id").and_then(|v| v.as_u64()),
-                window.get("title").and_then(|v| v.as_str()),
-                window.get("app_id").and_then(|v| v.as_str()),
-                window.get("is_focused").and_then(|v| v.as_bool()),
-            ) {
-                if app_id == "org.niri.dock" {
-                    continue;
-                }
-                window_list.push(WindowInfo {
-                    id,
-                    title: title.to_string(),
-                    app_id: app_id.to_string(),
-                    focused,
-                });
-            }
-        }
-        Ok(window_list)
+        Ok(windows.iter().filter_map(parse_window).collect())
     } else {
         Err("Failed to parse windows response".into())
     }
@@ -102,4 +91,78 @@ pub async fn spawn(command: String) -> Result<(), Box<dyn std::error::Error>> {
     } else {
         Err(format!("Failed to spawn command: {}", response).into())
     }
+}
+
+pub async fn event_stream(
+    tx: tokio::sync::mpsc::UnboundedSender<NiriEvent>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut stream = connect().await?;
+    stream.write_all(b"\"EventStream\"\n").await?;
+
+    let (reader, _) = stream.into_split();
+    let mut lines = BufReader::new(reader).lines();
+
+    lines.next_line().await?;
+
+    while let Some(line) = lines.next_line().await? {
+        let value: Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(e) => {
+                log::warn!("Failed to parse event line: {e}");
+                continue;
+            }
+        };
+
+        if let Some(event) = parse_event(&value) {
+            if tx.send(event).is_err() {
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn parse_event(v: &Value) -> Option<NiriEvent> {
+    if let Some(windows) = v
+        .get("WindowsChanged")
+        .and_then(|e| e.get("windows"))
+        .and_then(|w| w.as_array())
+    {
+        return Some(NiriEvent::WindowsChanged(
+            windows.iter().filter_map(parse_window).collect(),
+        ));
+    }
+
+    if let Some(w) = v.get("WindowOpenedOrChanged").and_then(|e| e.get("window")) {
+        return parse_window(w).map(NiriEvent::WindowOpenedOrChanged);
+    }
+
+    if let Some(id) = v
+        .get("WindowClosed")
+        .and_then(|e| e.get("id"))
+        .and_then(|i| i.as_u64())
+    {
+        return Some(NiriEvent::WindowClosed(id));
+    }
+
+    if let Some(e) = v.get("WindowFocusChanged") {
+        let id = e.get("id").and_then(|i| i.as_u64());
+        return Some(NiriEvent::WindowFocusChanged(id));
+    }
+
+    None
+}
+
+fn parse_window(w: &Value) -> Option<WindowInfo> {
+    let id = w.get("id")?.as_u64()?;
+    let title = w.get("title")?.as_str()?.to_string();
+    let app_id = w.get("app_id")?.as_str()?.to_string();
+    let focused = w.get("is_focused")?.as_bool()?;
+
+    if app_id == "org.niri.dock" {
+        return None;
+    }
+
+    Some(WindowInfo { id, title, app_id, focused })
 }
