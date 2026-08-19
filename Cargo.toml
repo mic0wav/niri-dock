@@ -1,0 +1,16 @@
+[package]
+name = "dock"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+env_logger = "0.11.6"
+gtk4-layer-shell = "0.4.0"
+log = "0.4.26"
+relm4 = "0.9.1"
+tokio = { version = "1.43.0", features = ["full"] }
+tracker = "0.2.2"
+toml = "0.8.20"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0"
+gtk4 = "0.9"
