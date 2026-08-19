@@ -7,7 +7,7 @@ This is a simple dock made in rust for niri, it uses gtk4 and layer-shell
 ## installing and running
 
 ```
-$ git clone mic0wav/dock --depth=1
+$ git clone mic0wav/niri-dock --depth=1
 $ cd dock
 
 $ cargo r # to test if it works
@@ -15,7 +15,7 @@ $ cargo r # to test if it works
 $ cargo b --release
 $ ./target/release/dock # for the optimized binary
 
-$ cargo install # for user wide installation
+$ cargo install --path . # for user wide installation
 ```
 
 
