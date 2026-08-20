@@ -8,6 +8,7 @@ use gtk::prelude::*;
 use relm4::prelude::*;
 
 use icon_button::Action;
+use crate::niri_ipc::NiriEvent;
 
 #[derive(serde::Deserialize, Clone)]
 struct Launchables {
@@ -26,19 +27,17 @@ pub struct DockModel {
     #[tracker::do_not_track]
     indicator: Controller<indicator::IndicatorModel>,
     #[tracker::do_not_track]
-    last_window_ids: Vec<u64>,
+    windows: Vec<crate::niri_ipc::WindowInfo>,
     apps_count: usize,
 }
 
 #[derive(Debug)]
 pub enum Input {
-    Init,
     Enter,
     Leave,
-    Update,
     Focus(u64),
     Launch(String),
-    WindowsFetched(Vec<crate::niri_ipc::WindowInfo>),
+    NiriEvent(NiriEvent),
 }
 
 #[derive(Debug)]
@@ -126,7 +125,7 @@ impl SimpleComponent for DockModel {
             apps,
             launchables,
             indicator,
-            last_window_ids: vec![],
+            windows: vec![],
             apps_count: 0,
             tracker: 0,
         };
@@ -137,13 +136,24 @@ impl SimpleComponent for DockModel {
 
         layer_shell::anchor_bottom(&widgets.window);
 
-        sender.input(Input::Init);
-        let sender = sender.clone();
+        // One task owns the actual socket and turns raw niri events into a
+        // Rust channel; a second forwards those into this component's own
+        // input queue. If the socket ever drops (niri restarted, etc.) it
+        // waits a couple seconds and reconnects rather than giving up.
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         crate::runtime().spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
             loop {
-                interval.tick().await;
-                sender.input(Input::Update);
+                if let Err(e) = crate::niri_ipc::event_stream(tx.clone()).await {
+                    log::error!("Niri event stream ended: {e}, retrying in 2s");
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+        });
+
+        let sender_clone = sender.clone();
+        crate::runtime().spawn(async move {
+            while let Some(event) = rx.recv().await {
+                sender_clone.input(Input::NiriEvent(event));
             }
         });
 
@@ -167,38 +177,37 @@ impl SimpleComponent for DockModel {
                 self.set_visible(false);
                 self.indicator.emit(indicator::Input::Leave);
             }
-            Input::Update => {
-                let sender = sender.clone();
-                crate::runtime().spawn(async move {
-                    match crate::niri_ipc::get_windows().await {
-                        Ok(windows) => sender.input(Input::WindowsFetched(windows)),
-                        Err(e) => log::error!("Failed to get windows: {e}"),
+            Input::NiriEvent(event) => {
+                match event {
+                    NiriEvent::WindowsChanged(windows) => {
+                        self.windows = windows;
                     }
-                });
-            }
-            Input::Init => {
-                let sender = sender.clone();
-                crate::runtime().spawn(async move {
-                    match crate::niri_ipc::get_windows().await {
-                        Ok(windows) => sender.input(Input::WindowsFetched(windows)),
-                        Err(e) => log::error!("Failed to initialize windows: {e}"),
+                    NiriEvent::WindowOpenedOrChanged(w) => {
+                        if let Some(existing) = self.windows.iter_mut().find(|x| x.id == w.id) {
+                            *existing = w;
+                        } else {
+                            self.windows.push(w);
+                        }
                     }
-                });
-            }
-            Input::WindowsFetched(windows) => {
-                let ids: Vec<u64> = windows.iter().map(|w| w.id).collect();
-                if ids != self.last_window_ids {
-                    self.last_window_ids = ids;
-                    self.set_apps_count(windows.len());
-                    let mut guard = self.apps.guard();
-                    guard.clear();
-                    for w in windows {
-                        guard.push_back((
-                            icon_name_for_app_id(&w.app_id),
-                            Action::Focus(w.id),
-                            w.focused,
-                        ));
+                    NiriEvent::WindowClosed(id) => {
+                        self.windows.retain(|w| w.id != id);
                     }
+                    NiriEvent::WindowFocusChanged(focused_id) => {
+                        for w in self.windows.iter_mut() {
+                            w.focused = Some(w.id) == focused_id;
+                        }
+                    }
+                }
+
+                self.set_apps_count(self.windows.len());
+                let mut guard = self.apps.guard();
+                guard.clear();
+                for w in &self.windows {
+                    guard.push_back((
+                        icon_name_for_app_id(&w.app_id),
+                        Action::Focus(w.id),
+                        w.focused,
+                    ));
                 }
             }
         }
