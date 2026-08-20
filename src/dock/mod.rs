@@ -137,10 +137,6 @@ impl SimpleComponent for DockModel {
 
         layer_shell::anchor_bottom(&widgets.window);
 
-        // One task owns the actual socket and turns raw niri events into a
-        // Rust channel; a second forwards those into this component's own
-        // input queue. If the socket ever drops (niri restarted, etc.) it
-        // waits a couple seconds and reconnects rather than giving up.
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         crate::runtime().spawn(async move {
             loop {
