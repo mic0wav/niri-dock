@@ -49,22 +49,6 @@ pub async fn send_request(request: Value) -> Result<Value, Box<dyn std::error::E
     Ok(response)
 }
 
-pub async fn get_windows() -> Result<Vec<WindowInfo>, Box<dyn std::error::Error>> {
-    let request = json!("Windows");
-
-    let response = send_request(request).await?;
-
-    if let Some(windows) = response
-        .get("Ok")
-        .and_then(|v| v.get("Windows"))
-        .and_then(|v| v.as_array())
-    {
-        Ok(windows.iter().filter_map(parse_window).collect())
-    } else {
-        Err("Failed to parse windows response".into())
-    }
-}
-
 pub async fn focus_window(id: u64) -> Result<(), Box<dyn std::error::Error>> {
     let request = json!({
         "Action": {

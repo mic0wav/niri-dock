@@ -106,6 +106,7 @@ impl SimpleComponent for DockModel {
                     y.to_owned(),
                     Action::Launch(x.commands[i].clone()),
                     false,
+                    y.to_owned(),
                 ));
             }
         }
@@ -207,6 +208,7 @@ impl SimpleComponent for DockModel {
                         icon_name_for_app_id(&w.app_id),
                         Action::Focus(w.id),
                         w.focused,
+                        w.title.clone(),
                     ));
                 }
             }
