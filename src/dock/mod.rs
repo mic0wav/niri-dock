@@ -100,6 +100,13 @@ impl SimpleComponent for DockModel {
                 icon_button::Output::Launch(x) => Input::Launch(x),
             });
         if let Some(x) = load_launchables() {
+            if x.icons.len() != x.commands.len() {
+                log::warn!(
+                   "config.toml: `icons` has {} entries but `commands` has {}",
+                   x.icons.len(),
+                   x.commands.len()
+               );
+            }
             for (i, y) in x.icons.iter().enumerate() {
                 launchables.guard().push_back((
                     y.to_owned(),
