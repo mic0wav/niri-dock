@@ -107,12 +107,12 @@ impl SimpleComponent for DockModel {
                    x.commands.len()
                );
             }
-            for (i, y) in x.icons.iter().enumerate() {
+            for (icon, command) in x.icons.iter().zip(x.commands.iter()) {
                 launchables.guard().push_back((
-                    y.to_owned(),
-                    Action::Launch(x.commands[i].clone()),
+                    icon.to_owned(),
+                    Action::Launch(command.clone()),
                     false,
-                    y.to_owned(),
+                    icon.to_owned(),
                 ));
             }
         }
