@@ -8,7 +8,7 @@ This is a simple dock made in rust for niri, it uses gtk4 and layer-shell
 
 ```
 $ git clone https://github.com/mic0wav/niri-dock --depth=1
-$ cd dock
+$ cd niri-dock
 
 $ cargo r # to test if it works
 

@@ -18,7 +18,6 @@ struct Launchables {
 
 #[tracker::track]
 pub struct DockModel {
-    enabled: bool,
     visible: bool,
     #[tracker::do_not_track]
     apps: AsyncFactoryVecDeque<icon_button::IconButtonModel>,
@@ -55,8 +54,8 @@ impl SimpleComponent for DockModel {
     view! {
         #[name = "window"]
         gtk::Window {
-            #[track = "model.changed_visible() || model.changed_enabled()"]
-            set_visible: model.visible && model.enabled,
+            #[track = "model.changed_visible()"]
+            set_visible: model.visible,
 
             gtk::Box {
                 set_margin_all: 8,
@@ -121,7 +120,6 @@ impl SimpleComponent for DockModel {
                 });
 
         let model = DockModel {
-            enabled: true,
             visible: false,
             apps,
             launchables,
