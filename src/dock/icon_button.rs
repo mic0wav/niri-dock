@@ -23,6 +23,7 @@ pub enum Output {
 #[derive(Debug, Clone)]
 pub enum Input {
     Clicked,
+    SetFocused(bool),
 }
 
 #[relm4::factory(pub async)]
@@ -61,6 +62,9 @@ impl AsyncFactoryComponent for IconButtonModel {
                     Action::Launch(cmd) => Output::Launch(cmd.clone()),
                 };
                 sender.output(out).unwrap();
+            }
+            Input::SetFocused(focused) => {
+                self.focused = focused;
             }
         }
     }

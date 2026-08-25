@@ -45,6 +45,22 @@ pub enum Output {
     Launch(String),
 }
 
+impl DockModel {
+    fn rebuild_apps(&mut self) {
+        self.set_apps_count(self.windows.len());
+        let mut guard = self.apps.guard();
+        guard.clear();
+        for w in &self.windows {
+            guard.push_back((
+                icon_name_for_app_id(&w.app_id),
+                Action::Focus(w.id),
+                w.focused,
+                w.title.clone(),
+            ));
+        }
+    }
+}
+
 #[relm4::component(pub)]
 impl SimpleComponent for DockModel {
     type Init = ();
@@ -183,20 +199,29 @@ impl SimpleComponent for DockModel {
                 match event {
                     NiriEvent::WindowsChanged(windows) => {
                         self.windows = windows;
+                        self.rebuild_apps();
                     }
                     NiriEvent::WindowOpenedOrChanged(w) => {
+                        let existed = self.windows.iter().any(|x| x.id == w.id);
                         if let Some(existing) = self.windows.iter_mut().find(|x| x.id == w.id) {
                             *existing = w;
                         } else {
                             self.windows.push(w);
                         }
+                        if !existed {
+                            self.rebuild_apps()
+                        }
                     }
                     NiriEvent::WindowClosed(id) => {
                         self.windows.retain(|w| w.id != id);
+                        self.rebuild_apps();
                     }
                     NiriEvent::WindowFocusChanged(focused_id) => {
                         for w in self.windows.iter_mut() {
                             w.focused = Some(w.id) == focused_id;
+                        }
+                        for (i, w) in self.windows.iter().enumerate() {
+                            self.apps.guard().send(i, icon_button::Input::SetFocused(w.focused));
                         }
                     }
                 }
