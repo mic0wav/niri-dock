@@ -232,18 +232,6 @@ impl SimpleComponent for DockModel {
                         }
                     }
                 }
-
-                self.set_apps_count(self.windows.len());
-                let mut guard = self.apps.guard();
-                guard.clear();
-                for w in &self.windows {
-                    guard.push_back((
-                        icon_name_for_app_id(&w.app_id),
-                        Action::Focus(w.id),
-                        w.focused,
-                        w.title.clone(),
-                    ));
-                }
             }
         }
     }
