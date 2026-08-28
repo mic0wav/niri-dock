@@ -10,6 +10,13 @@ use relm4::prelude::*;
 use icon_button::Action;
 use crate::niri_ipc::NiriEvent;
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+
+thread_local! {
+    static ICON_CACHE: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
+}
+
 #[derive(serde::Deserialize, Clone)]
 struct Launchables {
     icons: Vec<String>,
@@ -276,18 +283,27 @@ fn load_launchables() -> Option<Launchables> {
 }
 
 fn icon_name_for_app_id(app_id: &str) -> String {
+    if let Some(cached) = ICON_CACHE.with(|c| c.borrow().get(app_id).cloned()) {
+        return cached;
+    }
+
     let candidates = [
         format!("{app_id}.desktop"),
         format!("{}.desktop", app_id.to_lowercase()),
     ];
+
+    let mut resolved = app_id.to_string();
     for desktop_id in candidates {
         if let Some(info) = gtk::gio::DesktopAppInfo::new(&desktop_id) {
             if let Some(icon) = info.icon() {
                 if let Some(name) = icon.to_string() {
-                    return name.to_string();
+                    resolved = name.to_string();
+                    break;
                 }
             }
         }
     }
-    app_id.to_string()
+
+    ICON_CACHE.with(|c| c.borrow_mut().insert(app_id.to_string(), resolved.clone()));
+    resolved
 }
