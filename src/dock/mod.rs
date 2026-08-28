@@ -282,13 +282,11 @@ fn icon_name_for_app_id(app_id: &str) -> String {
 
     let mut resolved = app_id.to_string();
     for desktop_id in candidates {
-        if let Some(info) = gtk::gio::DesktopAppInfo::new(&desktop_id) {
-            if let Some(icon) = info.icon() {
-                if let Some(name) = icon.to_string() {
-                    resolved = name.to_string();
-                    break;
-                }
-            }
+        if let Some(info) = gtk::gio::DesktopAppInfo::new(&desktop_id)
+            && let Some(icon) = info.icon() 
+            && let Some(name) = icon.to_string() {
+                resolved = name.to_string();
+                break;
         }
     }
 

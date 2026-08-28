@@ -98,10 +98,8 @@ pub async fn event_stream(
             }
         };
 
-        if let Some(event) = parse_event(&value) {
-            if tx.send(event).is_err() {
-                break;
-            }
+        if let Some(event) = parse_event(&value) && tx.send(event).is_err() {
+            break;
         }
     }
 
