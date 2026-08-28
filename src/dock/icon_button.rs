@@ -24,6 +24,8 @@ pub enum Output {
 pub enum Input {
     Clicked,
     SetFocused(bool),
+    SetTitle(String),
+    SetIcon(String),
 }
 
 #[relm4::factory(pub async)]
@@ -39,11 +41,13 @@ impl AsyncFactoryComponent for IconButtonModel {
         gtk::Button {
             #[watch]
             set_class_active: ("active", self.focused),
+            #[watch]
             set_tooltip_text: Some(&self.title),
             add_css_class: "app",
             set_valign: gtk::Align::Center,
             connect_clicked => Input::Clicked,
             gtk::Image {
+                #[watch]
                 set_icon_name: Some(&self.icon_name),
                 set_icon_size: gtk::IconSize::Large,
             }
@@ -66,6 +70,8 @@ impl AsyncFactoryComponent for IconButtonModel {
             Input::SetFocused(focused) => {
                 self.focused = focused;
             }
+            Input::SetTitle(t) => self.title = t,
+            Input::SetIcon(i) => self.icon_name = i,
         }
     }
 }

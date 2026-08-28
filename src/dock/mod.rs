@@ -209,14 +209,22 @@ impl SimpleComponent for DockModel {
                         self.rebuild_apps();
                     }
                     NiriEvent::WindowOpenedOrChanged(w) => {
-                        let existed = self.windows.iter().any(|x| x.id == w.id);
-                        if let Some(existing) = self.windows.iter_mut().find(|x| x.id == w.id) {
+                        if let Some((i, existing)) = self.windows.iter_mut().enumerate().find(|(_, x)| x.id == w.id) {
+                            let title_changed = existing.title != w.title;
+                            let icon_changed = existing.app_id != w.app_id;
+
                             *existing = w;
+
+                            if title_changed {
+                                self.apps.guard().send(i, icon_button::Input::SetTitle(existing.title.clone()));
+                            }
+                            if icon_changed {
+                                self.apps.guard().send(i, icon_button::Input::SetIcon(icon_name_for_app_id(&existing.app_id)));
+                            }
+                            
                         } else {
                             self.windows.push(w);
-                        }
-                        if !existed {
-                            self.rebuild_apps()
+                            self.rebuild_apps();
                         }
                     }
                     NiriEvent::WindowClosed(id) => {
