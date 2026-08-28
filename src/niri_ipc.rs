@@ -36,7 +36,8 @@ pub enum NiriEvent {
 pub async fn send_request(request: Value) -> Result<Value, Box<dyn std::error::Error>> {
     let mut stream = connect().await?;
 
-    let request_str = format!("{}\n", request.to_string());
+    let mut request_str = request.to_string();
+    request_str.push('\n');
     stream.write_all(request_str.as_bytes()).await?;
 
     let (reader, _) = stream.into_split();
