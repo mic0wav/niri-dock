@@ -215,11 +215,12 @@ impl SimpleComponent for DockModel {
 
                             *existing = w;
 
+                            let guard = self.apps.guard();
                             if title_changed {
-                                self.apps.guard().send(i, icon_button::Input::SetTitle(existing.title.clone()));
+                                guard.send(i, icon_button::Input::SetTitle(existing.title.clone()));
                             }
                             if icon_changed {
-                                self.apps.guard().send(i, icon_button::Input::SetIcon(icon_name_for_app_id(&existing.app_id)));
+                                guard.send(i, icon_button::Input::SetIcon(icon_name_for_app_id(&existing.app_id)));
                             }
                             
                         } else {
@@ -235,8 +236,9 @@ impl SimpleComponent for DockModel {
                         for w in self.windows.iter_mut() {
                             w.focused = Some(w.id) == focused_id;
                         }
+                        let guard = self.apps.guard();
                         for (i, w) in self.windows.iter().enumerate() {
-                            self.apps.guard().send(i, icon_button::Input::SetFocused(w.focused));
+                            guard.send(i, icon_button::Input::SetFocused(w.focused));
                         }
                     }
                 }
