@@ -24,8 +24,7 @@ pub enum Output {
 pub enum Input {
     Clicked,
     SetFocused(bool),
-    SetTitle(String),
-    SetIcon(String),
+    Update { icon_name: String, title: String },
 }
 
 #[relm4::factory(pub async)]
@@ -70,8 +69,19 @@ impl AsyncFactoryComponent for IconButtonModel {
             Input::SetFocused(focused) => {
                 self.focused = focused;
             }
-            Input::SetTitle(t) => self.title = t,
-            Input::SetIcon(i) => self.icon_name = i,
+            Input::Update { icon_name, title } => {
+                self.icon_name = icon_name;
+                self.title = title;
+            }
+        }
+    }
+}
+
+impl IconButtonModel {
+    pub fn window_id(&self) -> Option<u64> {
+        match self.action {
+            Action::Focus(id) => Some(id),
+            Action::Launch(_) => None,
         }
     }
 }

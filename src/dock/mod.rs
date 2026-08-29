@@ -32,8 +32,6 @@ pub struct DockModel {
     launchables: AsyncFactoryVecDeque<icon_button::IconButtonModel>,
     #[tracker::do_not_track]
     indicator: Controller<indicator::IndicatorModel>,
-    #[tracker::do_not_track]
-    windows: Vec<crate::niri_ipc::WindowInfo>,
     apps_count: usize,
 }
 
@@ -50,22 +48,6 @@ pub enum Input {
 pub enum Output {
     Focus(u64),
     Launch(String),
-}
-
-impl DockModel {
-    fn rebuild_apps(&mut self) {
-        self.set_apps_count(self.windows.len());
-        let mut guard = self.apps.guard();
-        guard.clear();
-        for w in &self.windows {
-            guard.push_back((
-                icon_name_for_app_id(&w.app_id),
-                Action::Focus(w.id),
-                w.focused,
-                w.title.clone(),
-            ));
-        }
-    }
 }
 
 #[relm4::component(pub)]
@@ -154,7 +136,6 @@ impl SimpleComponent for DockModel {
             apps,
             launchables,
             indicator,
-            windows: vec![],
             apps_count: 0,
             tracker: 0,
         };
@@ -202,44 +183,60 @@ impl SimpleComponent for DockModel {
                 self.set_visible(false);
                 self.indicator.emit(indicator::Input::Leave);
             }
-            Input::NiriEvent(event) => {
-                match event {
-                    NiriEvent::WindowsChanged(windows) => {
-                        self.windows = windows;
-                        self.rebuild_apps();
+            Input::NiriEvent(event) => match event {
+                NiriEvent::WindowsChanged(windows) => {
+                    let mut guard = self.apps.guard();
+                    guard.clear();
+                    for w in &windows {
+                        guard.push_back((
+                            icon_name_for_app_id(&w.app_id),
+                            Action::Focus(w.id),
+                            w.focused,
+                            w.title.clone(),
+                        ));
                     }
-                    NiriEvent::WindowOpenedOrChanged(w) => {
-                        if let Some((i, existing)) = self.windows.iter_mut().enumerate().find(|(_, x)| x.id == w.id) {
-                            let title_changed = existing.title != w.title;
-                            let icon_changed = existing.app_id != w.app_id;
-
-                            *existing = w;
-
-                            let guard = self.apps.guard();
-                            if title_changed {
-                                guard.send(i, icon_button::Input::SetTitle(existing.title.clone()));
-                            }
-                            if icon_changed {
-                                guard.send(i, icon_button::Input::SetIcon(icon_name_for_app_id(&existing.app_id)));
-                            }
-                            
-                        } else {
-                            self.windows.push(w);
-                            self.rebuild_apps();
+                    drop(guard);
+                    self.set_apps_count(windows.len());
+                }
+                NiriEvent::WindowOpenedOrChanged(w) => {
+                    let mut guard = self.apps.guard();
+                    let existing = guard.iter().position(|item| item.and_then(|i| i.window_id()) == Some(w.id));
+                    match existing {
+                        Some(index) => {
+                            guard.send(index, icon_button::Input::Update {
+                                icon_name: icon_name_for_app_id(&w.app_id),
+                                title: w.title,
+                            });
+                        }
+                        None => {
+                            guard.push_back((
+                                icon_name_for_app_id(&w.app_id),
+                                Action::Focus(w.id),
+                                w.focused,
+                                w.title,
+                            ));
                         }
                     }
-                    NiriEvent::WindowClosed(id) => {
-                        self.windows.retain(|w| w.id != id);
-                        self.rebuild_apps();
+                    let count = guard.len();
+                    drop(guard);
+                    self.set_apps_count(count);
+                }
+                NiriEvent::WindowClosed(id) => {
+                    let mut guard = self.apps.guard();
+                    let index = guard.iter()
+                        .position(|item| item.and_then(|i| i.window_id()) == Some(id));
+                    if let Some(index) = index {
+                        guard.remove(index);
                     }
-                    NiriEvent::WindowFocusChanged(focused_id) => {
-                        for w in self.windows.iter_mut() {
-                            w.focused = Some(w.id) == focused_id;
-                        }
-                        let guard = self.apps.guard();
-                        for (i, w) in self.windows.iter().enumerate() {
-                            guard.send(i, icon_button::Input::SetFocused(w.focused));
-                        }
+                    let count = guard.len();
+                    drop(guard);
+                    self.set_apps_count(count);
+                }
+                NiriEvent::WindowFocusChanged(focused_id) => {
+                    let guard = self.apps.guard();
+                    for index in 0..guard.len() {
+                        let is_this_one = guard.get(index).and_then(|i| i.window_id()) == focused_id;
+                        guard.send(index, icon_button::Input::SetFocused(is_this_one));
                     }
                 }
             }
@@ -293,7 +290,7 @@ fn icon_name_for_app_id(app_id: &str) -> String {
     let mut resolved = app_id.to_string();
     for desktop_id in candidates {
         if let Some(info) = gtk::gio::DesktopAppInfo::new(&desktop_id)
-            && let Some(icon) = info.icon() 
+            && let Some(icon) = info.icon()
             && let Some(name) = icon.to_string() {
                 resolved = name.to_string();
                 break;
