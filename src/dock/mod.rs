@@ -151,30 +151,23 @@ impl SimpleComponent for DockModel {
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         crate::runtime().spawn(async move {
+            let mut backoff = std::time::Duration::from_secs(1);
+            let max_backoff = std::time::Duration::from_secs(30);
             loop {
+                let started = std::time::Instant::now();
                 if let Err(e) = crate::niri_ipc::event_stream(tx.clone()).await {
-                    log::error!("Niri event stream ended: {e}, retrying in 2s");
+                    log::error!("Niri event stream ended: {e}");
+                } else {
+                    log::warn!("Niri event stream closed cleanly");
                 }
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                let mut backoff = std::time::Duration::from_secs(1);
-                let max_backoff = std::time::Duration::from_secs(30);
-                loop {
-                    let started = std::time::Instant::now();
-                    if let Err(e) = crate::niri_ipc::event_stream(tx.clone()).await {
-                        log::error!("Niri event stream ended: {e}");
-                    } else {
-                        log::warn!("Niri event stream closed cleanly");
-                    }
 
-                    backoff = if started.elapsed() > std::time::Duration::from_secs(10) {
-                        std::time::Duration::from_secs(1)
-                    } else {
-                        std::cmp::min(backoff * 2, max_backoff)
-                    };
-
-                    log::info!("Reconnecting to niri in {backoff:?}");
-                    tokio::time::sleep(backoff).await;
-                }
+                backoff = if started.elapsed() > std::time::Duration::from_secs(10) {
+                    std::time::Duration::from_secs(1)
+                } else {
+                    std::cmp::min(backoff * 2, max_backoff)
+                };
+                log::info!("Reconnecting to niri in {backoff:?}");
+                tokio::time::sleep(backoff).await;
             }
         });
 

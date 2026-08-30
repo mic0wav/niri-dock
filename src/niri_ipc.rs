@@ -1,17 +1,21 @@
 use serde_json::{json, Value};
 use std::path::PathBuf;
+use std::sync::OnceLock;
+use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::UnixStream;
+use tokio::sync::{mpsc, oneshot};
 
 pub const APP_ID: &str = "org.niri.dock";
 
-pub async fn connect() -> Result<UnixStream, Box<dyn std::error::Error>> {
+pub async fn connect() -> Result<UnixStream, Box<dyn std::error::Error + Send + Sync>> {
     let socket_path = get_niri_socket()?;
     let stream = UnixStream::connect(&socket_path).await?;
     Ok(stream)
 }
 
-fn get_niri_socket() -> Result<PathBuf, Box<dyn std::error::Error>> {
+fn get_niri_socket() -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
     if let Ok(socket) = std::env::var("NIRI_SOCKET") {
         Ok(PathBuf::from(socket))
     } else {
@@ -35,29 +39,89 @@ pub enum NiriEvent {
     WindowFocusChanged(Option<u64>),
 }
 
-pub async fn send_request(request: Value) -> Result<Value, Box<dyn std::error::Error>> {
-    let mut stream = connect().await?;
+type ReplyTx = oneshot::Sender<Result<Value, String>>;
 
-    let mut request_str = request.to_string();
-    request_str.push('\n');
-    stream.write_all(request_str.as_bytes()).await?;
-
-    let (reader, _) = stream.into_split();
-    let mut buf_reader = BufReader::new(reader);
-
-    let mut response_line = String::new();
-    buf_reader.read_line(&mut response_line).await?;
-
-    let response: Value = serde_json::from_str(&response_line)?;
-    Ok(response)
+fn request_tx() -> &'static mpsc::UnboundedSender<(Value, ReplyTx)> {
+    static REQUEST_TX: OnceLock<mpsc::UnboundedSender<(Value, ReplyTx)>> = OnceLock::new();
+    REQUEST_TX.get_or_init(|| {
+        let (tx, rx) = mpsc::unbounded_channel();
+        crate::runtime().spawn(request_worker(rx));
+        tx
+    })
 }
 
-pub async fn focus_window(id: u64) -> Result<(), Box<dyn std::error::Error>> {
-    let request = json!({
-        "Action": {
-            "FocusWindow": { "id": id }
+async fn request_worker(mut rx: mpsc::UnboundedReceiver<(Value, ReplyTx)>) {
+    let mut backoff = Duration::from_secs(1);
+    let max_backoff = Duration::from_secs(30);
+
+    loop {
+        let stream = match connect().await {
+            Ok(s) => s,
+            Err(e) => {
+                log::error!("Failed to connect to niri for requests: {e}, retrying in {backoff:?}");
+                tokio::time::sleep(backoff).await;
+                backoff = std::cmp::min(backoff * 2, max_backoff);
+                continue;
+            }
+        };
+        backoff = Duration::from_secs(1);
+
+        let (reader, mut writer) = stream.into_split();
+        let mut lines = BufReader::new(reader).lines();
+
+        while let Some((request, reply_tx)) = rx.recv().await {
+            let result = send_on_connection(&mut writer, &mut lines, request).await;
+            let failed = result.is_err();
+            let _ = reply_tx.send(result);
+
+            if failed {
+                break;
+            }
         }
-    });
+
+        if rx.is_closed() {
+            return;
+        }
+    }
+}
+
+async fn send_on_connection(
+    writer: &mut OwnedWriteHalf,
+    lines: &mut tokio::io::Lines<BufReader<OwnedReadHalf>>,
+    request: Value,
+) -> Result<Value, String> {
+    let mut request_str = request.to_string();
+    request_str.push('\n');
+
+    if let Err(e) = writer.write_all(request_str.as_bytes()).await {
+        return Err(format!("write failed: {e}"));
+    }
+
+    match tokio::time::timeout(Duration::from_secs(5), lines.next_line()).await {
+        Ok(Ok(Some(line))) => {
+            serde_json::from_str::<Value>(&line).map_err(|e| format!("bad JSON from niri: {e}"))
+        }
+        Ok(Ok(None)) => Err("niri closed the connection".to_string()),
+        Ok(Err(e)) => Err(format!("read failed: {e}")),
+        Err(_) => Err("timed out waiting for niri response".to_string()),
+    }
+}
+
+pub async fn send_request(request: Value) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+    let (reply_tx, reply_rx) = oneshot::channel();
+    request_tx()
+        .send((request, reply_tx))
+        .map_err(|_| "niri request worker is not running")?;
+
+    match reply_rx.await {
+        Ok(Ok(response)) => Ok(response),
+        Ok(Err(e)) => Err(e.into()),
+        Err(_) => Err("niri request worker dropped the reply".into()),
+    }
+}
+
+pub async fn focus_window(id: u64) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let request = json!({ "Action": { "FocusWindow": { "id": id } } });
     let response = send_request(request).await?;
     if response.get("Ok").is_some() {
         Ok(())
@@ -66,12 +130,8 @@ pub async fn focus_window(id: u64) -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-pub async fn spawn(command: String) -> Result<(), Box<dyn std::error::Error>> {
-    let request = json!({
-        "Action": {
-            "Spawn": { "command": ["sh", "-c", command] }
-        }
-    });
+pub async fn spawn(command: String) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let request = json!({ "Action": { "Spawn": { "command": ["sh", "-c", command] } } });
     let response = send_request(request).await?;
     if response.get("Ok").is_some() {
         Ok(())
@@ -81,8 +141,8 @@ pub async fn spawn(command: String) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 pub async fn event_stream(
-    tx: tokio::sync::mpsc::UnboundedSender<NiriEvent>,
-) -> Result<(), Box<dyn std::error::Error>> {
+    tx: mpsc::UnboundedSender<NiriEvent>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut stream = connect().await?;
     stream.write_all(b"\"EventStream\"\n").await?;
 
