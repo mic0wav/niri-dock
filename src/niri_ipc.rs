@@ -64,13 +64,21 @@ async fn request_worker(mut rx: mpsc::UnboundedReceiver<(Value, ReplyTx)>) {
                 continue;
             }
         };
-        backoff = Duration::from_secs(1);
 
+        let started = std::time::Instant::now();
         let (reader, mut writer) = stream.into_split();
         let mut lines = BufReader::new(reader).lines();
 
+        #[allow(unused_variables)]
         while let Some((request, reply_tx)) = rx.recv().await {
+            let Some((request, reply_tx)) = rx.recv().await else {
+                return;
+            };
+
             let result = send_on_connection(&mut writer, &mut lines, request).await;
+            if let Err(ref e) = result {
+                log::error!("Niri request failed: {e}");
+            }
             let failed = result.is_err();
             let _ = reply_tx.send(result);
 
@@ -79,9 +87,13 @@ async fn request_worker(mut rx: mpsc::UnboundedReceiver<(Value, ReplyTx)>) {
             }
         }
 
-        if rx.is_closed() {
-            return;
-        }
+        backoff = if started.elapsed() > Duration::from_secs(10) {
+            Duration::from_secs(1)
+        } else {
+            std::cmp::min(backoff * 2, max_backoff)
+        };
+        log::info!("Reconnecting niri request connection in {backoff:?}");
+        tokio::time::sleep(backoff).await;
     }
 }
 

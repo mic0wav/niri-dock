@@ -204,6 +204,7 @@ impl SimpleComponent for DockModel {
             }
             Input::NiriEvent(event) => match event {
                 NiriEvent::WindowsChanged(windows) => {
+                    ICON_CACHE.with(|c| c.borrow_mut().clear());
                     self.focused_window = windows.iter().find(|w| w.focused).map(|w| w.id);
                     let mut guard = self.apps.guard();
                     guard.clear();
@@ -315,15 +316,17 @@ fn icon_name_for_app_id(app_id: &str) -> String {
         format!("{}.desktop", app_id.to_lowercase()),
     ];
 
+    let mut resolved = app_id.to_string();
     for desktop_id in candidates {
         if let Some(info) = gtk::gio::DesktopAppInfo::new(&desktop_id)
             && let Some(icon) = info.icon()
             && let Some(name) = icon.to_string()
         {
-            let resolved = name.to_string();
-            ICON_CACHE.with(|c| c.borrow_mut().insert(app_id.to_string(), resolved.clone()));
-            return resolved;
+            resolved = name.to_string();
+            break
         }
     }
-    app_id.to_string()
+
+    ICON_CACHE.with(|c| c.borrow_mut().insert(app_id.to_string(), resolved.clone()));
+    resolved
 }
