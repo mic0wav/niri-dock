@@ -64,7 +64,9 @@ impl AsyncFactoryComponent for IconButtonModel {
                     Action::Focus(id) => Output::Focus(*id),
                     Action::Launch(cmd) => Output::Launch(cmd.clone()),
                 };
-                sender.output(out).unwrap();
+                if let Err(e) = sender.output(out) {
+                    log::error!("Failed to send icon button output: {e:?}");
+                }
             }
             Input::SetFocused(focused) => {
                 self.focused = focused;

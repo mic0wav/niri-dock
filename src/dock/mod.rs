@@ -32,6 +32,8 @@ pub struct DockModel {
     launchables: AsyncFactoryVecDeque<icon_button::IconButtonModel>,
     #[tracker::do_not_track]
     indicator: Controller<indicator::IndicatorModel>,
+    #[tracker::do_not_track]
+    focused_window: Option<u64>,
     apps_count: usize,
 }
 
@@ -138,6 +140,7 @@ impl SimpleComponent for DockModel {
             indicator,
             apps_count: 0,
             tracker: 0,
+            focused_window: None,
         };
 
         let apps_box = model.apps.widget();
@@ -153,6 +156,25 @@ impl SimpleComponent for DockModel {
                     log::error!("Niri event stream ended: {e}, retrying in 2s");
                 }
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                let mut backoff = std::time::Duration::from_secs(1);
+                let max_backoff = std::time::Duration::from_secs(30);
+                loop {
+                    let started = std::time::Instant::now();
+                    if let Err(e) = crate::niri_ipc::event_stream(tx.clone()).await {
+                        log::error!("Niri event stream ended: {e}");
+                    } else {
+                        log::warn!("Niri event stream closed cleanly");
+                    }
+
+                    backoff = if started.elapsed() > std::time::Duration::from_secs(10) {
+                        std::time::Duration::from_secs(1)
+                    } else {
+                        std::cmp::min(backoff * 2, max_backoff)
+                    };
+
+                    log::info!("Reconnecting to niri in {backoff:?}");
+                    tokio::time::sleep(backoff).await;
+                }
             }
         });
 
@@ -171,10 +193,14 @@ impl SimpleComponent for DockModel {
 
         match msg {
             Input::Launch(x) => {
-                sender.output(Output::Launch(x)).unwrap();
+                if let Err(e) =  sender.output(Output::Launch(x)) {
+                    log::error!("Failed to forward launch output: {e:?}");
+                }
             }
             Input::Focus(x) => {
-                sender.output(Output::Focus(x)).unwrap();
+                if let Err(e) = sender.output(Output::Focus(x)) {
+                    log::error!("Failed to to forward focus output: {e:?}");
+                }
             }
             Input::Enter => {
                 self.set_visible(true);
@@ -185,6 +211,7 @@ impl SimpleComponent for DockModel {
             }
             Input::NiriEvent(event) => match event {
                 NiriEvent::WindowsChanged(windows) => {
+                    self.focused_window = windows.iter().find(|w| w.focused).map(|w| w.id);
                     let mut guard = self.apps.guard();
                     guard.clear();
                     for w in &windows {
@@ -222,6 +249,9 @@ impl SimpleComponent for DockModel {
                     self.set_apps_count(count);
                 }
                 NiriEvent::WindowClosed(id) => {
+                    if self.focused_window == Some(id) {
+                        self.focused_window = None;
+                    }
                     let mut guard = self.apps.guard();
                     let index = guard.iter()
                         .position(|item| item.and_then(|i| i.window_id()) == Some(id));
@@ -233,10 +263,15 @@ impl SimpleComponent for DockModel {
                     self.set_apps_count(count);
                 }
                 NiriEvent::WindowFocusChanged(focused_id) => {
-                    let guard = self.apps.guard();
-                    for index in 0..guard.len() {
-                        let is_this_one = guard.get(index).and_then(|i| i.window_id()) == focused_id;
-                        guard.send(index, icon_button::Input::SetFocused(is_this_one));
+                    if focused_id != self.focused_window {
+                        let guard = self.apps.guard();
+                        for index in 0..guard.len() {
+                            let id = guard.get(index).and_then(|i| i.window_id());
+                            if id == self.focused_window || id == focused_id {
+                                guard.send(index, icon_button::Input::SetFocused(id == focused_id));
+                            }
+                        }
+                        self.focused_window = focused_id;
                     }
                 }
             }
@@ -254,7 +289,7 @@ fn load_launchables() -> Option<Launchables> {
     let mut file = match File::open(&path) {
         Ok(x) => x,
         Err(e) => {
-            log::error!("Failed to read config: {e}");
+            log::warn!("No config found at {}: {e}", path.display());
             return None;
         }
     };

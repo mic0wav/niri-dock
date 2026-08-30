@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
+pub const APP_ID: &str = "org.niri.dock";
+
 pub async fn connect() -> Result<UnixStream, Box<dyn std::error::Error>> {
     let socket_path = get_niri_socket()?;
     let stream = UnixStream::connect(&socket_path).await?;
@@ -134,16 +136,41 @@ fn parse_event(v: &Value) -> Option<NiriEvent> {
         return Some(NiriEvent::WindowFocusChanged(id));
     }
 
+    log::debug!("Unrecognized niri event, ignoring: {v}");
     None
 }
 
 fn parse_window(w: &Value) -> Option<WindowInfo> {
-    let id = w.get("id")?.as_u64()?;
-    let title = w.get("title")?.as_str()?.to_string();
-    let app_id = w.get("app_id")?.as_str()?.to_string();
-    let focused = w.get("is_focused")?.as_bool()?;
+    let id = match w.get("id").and_then(|v| v.as_u64()) {
+        Some(v) => v,
+        None => {
+            log::warn!("Window entry missing/invalid `id`: {w}");
+            return None;
+        }
+    };
+    let title = match w.get("title").and_then(|v| v.as_str()) {
+        Some(v) => v.to_string(),
+        None => {
+            log::warn!("Window {id} missing/invalid `title`: {w}");
+            return None;
+        }
+    };
+    let app_id = match w.get("app_id").and_then(|v| v.as_str()) {
+        Some(v) => v.to_string(),
+        None => {
+            log::warn!("Window {id} missing/invalid `app_id`: {w}");
+            return None;
+        }
+    };
+    let focused = match w.get("is_focused").and_then(|v| v.as_bool()) {
+        Some(v) => v,
+        None => {
+            log::warn!("Window {id} missing/invalid `is_focused`: {w}");
+            return None;
+        }
+    };
 
-    if app_id == "org.niri.dock" {
+    if app_id == APP_ID {
         return None;
     }
 

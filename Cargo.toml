@@ -8,7 +8,7 @@ env_logger = "0.11.6"
 gtk4-layer-shell = "0.4.0"
 log = "0.4.26"
 relm4 = "0.9.1"
-tokio = { version = "1.43.0", features = ["full"] }
+tokio = { version = "1.43.0", features = ["rt-multi-thread", "net", "io-util", "time", "sync"] }
 tracker = "0.2.2"
 toml = "0.8.20"
 serde = { version = "1.0.219", features = ["derive"] }

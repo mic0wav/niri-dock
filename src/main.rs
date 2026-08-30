@@ -82,7 +82,7 @@ impl SimpleComponent for AppModel {
 
 fn main() {
     env_logger::Builder::from_env(Env::default().default_filter_or("warn")).init();
-    let app = RelmApp::new("org.niri.dock");
+    let app = RelmApp::new(niri_ipc::APP_ID);
 
     set_global_css(&load_css());
     app.run::<AppModel>(());
