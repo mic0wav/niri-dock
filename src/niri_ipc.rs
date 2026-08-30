@@ -55,10 +55,10 @@ async fn request_worker(mut rx: mpsc::UnboundedReceiver<(Value, ReplyTx)>) {
     let max_backoff = Duration::from_secs(30);
 
     loop {
-        let stream = match connect().await {
+       let stream = match connect().await {
             Ok(s) => s,
             Err(e) => {
-                log::error!("Failed to connect to niri for requests: {e}, retrying in {backoff:?}");
+                log::error!("REQ: connect failed: {e}");
                 tokio::time::sleep(backoff).await;
                 backoff = std::cmp::min(backoff * 2, max_backoff);
                 continue;
@@ -69,20 +69,19 @@ async fn request_worker(mut rx: mpsc::UnboundedReceiver<(Value, ReplyTx)>) {
         let (reader, mut writer) = stream.into_split();
         let mut lines = BufReader::new(reader).lines();
 
-        #[allow(unused_variables)]
-        while let Some((request, reply_tx)) = rx.recv().await {
-            let Some((request, reply_tx)) = rx.recv().await else {
-                return;
+        loop {
+           let Some((request, reply_tx)) = rx.recv().await else {
+               return;
             };
 
             let result = send_on_connection(&mut writer, &mut lines, request).await;
-            if let Err(ref e) = result {
-                log::error!("Niri request failed: {e}");
-            }
             let failed = result.is_err();
-            let _ = reply_tx.send(result);
+            if reply_tx.send(result).is_err() {
+                log::error!("REQ: caller already gave up waiting for this reply");
+            }
 
             if failed {
+                log::warn!("REQ: connection considered dead, reconnecting");
                 break;
             }
         }
@@ -92,7 +91,6 @@ async fn request_worker(mut rx: mpsc::UnboundedReceiver<(Value, ReplyTx)>) {
         } else {
             std::cmp::min(backoff * 2, max_backoff)
         };
-        log::info!("Reconnecting niri request connection in {backoff:?}");
         tokio::time::sleep(backoff).await;
     }
 }
