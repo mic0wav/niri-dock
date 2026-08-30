@@ -109,10 +109,10 @@ impl SimpleComponent for DockModel {
         if let Some(x) = load_launchables() {
             if x.icons.len() != x.commands.len() {
                 log::warn!(
-                   "config.toml: `icons` has {} entries but `commands` has {}",
-                   x.icons.len(),
-                   x.commands.len()
-               );
+                    "config.toml: `icons` has {} entries but `commands` has {}",
+                    x.icons.len(),
+                    x.commands.len()
+                );
             }
             for (icon, command) in x.icons.iter().zip(x.commands.iter()) {
                 launchables.guard().push_back((
