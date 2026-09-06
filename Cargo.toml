@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+niri_ipc_types = {package = "niri-ipc", version = "26.4.0" }
 env_logger = "0.11.6"
 gtk4-layer-shell = "0.4.0"
 log = "0.4.26"

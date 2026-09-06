@@ -1,4 +1,4 @@
-use serde_json::{Value, json};
+use niri_ipc_types::{Action, Event, Reply, Request};
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -23,26 +23,10 @@ fn get_niri_socket() -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct WindowInfo {
-    pub id: u64,
-    pub title: String,
-    pub app_id: String,
-    pub focused: bool,
-}
+type ReplyTx = oneshot::Sender<Result<Reply, String>>;
 
-#[derive(Debug, Clone)]
-pub enum NiriEvent {
-    WindowsChanged(Vec<WindowInfo>),
-    WindowOpenedOrChanged(WindowInfo),
-    WindowClosed(u64),
-    WindowFocusChanged(Option<u64>),
-}
-
-type ReplyTx = oneshot::Sender<Result<Value, String>>;
-
-fn request_tx() -> &'static mpsc::UnboundedSender<(Value, ReplyTx)> {
-    static REQUEST_TX: OnceLock<mpsc::UnboundedSender<(Value, ReplyTx)>> = OnceLock::new();
+fn request_tx() -> &'static mpsc::UnboundedSender<(Request, ReplyTx)> {
+    static REQUEST_TX: OnceLock<mpsc::UnboundedSender<(Request, ReplyTx)>> = OnceLock::new();
     REQUEST_TX.get_or_init(|| {
         let (tx, rx) = mpsc::unbounded_channel();
         crate::runtime().spawn(request_worker(rx));
@@ -50,7 +34,7 @@ fn request_tx() -> &'static mpsc::UnboundedSender<(Value, ReplyTx)> {
     })
 }
 
-async fn request_worker(mut rx: mpsc::UnboundedReceiver<(Value, ReplyTx)>) {
+async fn request_worker(mut rx: mpsc::UnboundedReceiver<(Request, ReplyTx)>) {
     let mut backoff = Duration::from_secs(1);
     let max_backoff = Duration::from_secs(30);
 
@@ -98,9 +82,10 @@ async fn request_worker(mut rx: mpsc::UnboundedReceiver<(Value, ReplyTx)>) {
 async fn send_on_connection(
     writer: &mut OwnedWriteHalf,
     lines: &mut tokio::io::Lines<BufReader<OwnedReadHalf>>,
-    request: Value,
-) -> Result<Value, String> {
-    let mut request_str = request.to_string();
+    request: Request,
+) -> Result<Reply, String> {
+    let mut request_str =
+        serde_json::to_string(&request).map_err(|e| format!("failed to serialize request: {e}"))?;
     request_str.push('\n');
 
     if let Err(e) = writer.write_all(request_str.as_bytes()).await {
@@ -109,7 +94,7 @@ async fn send_on_connection(
 
     match tokio::time::timeout(Duration::from_secs(5), lines.next_line()).await {
         Ok(Ok(Some(line))) => {
-            serde_json::from_str::<Value>(&line).map_err(|e| format!("bad JSON from niri: {e}"))
+            serde_json::from_str::<Reply>(&line).map_err(|e| format!("bad JSON from niri: {e}"))
         }
         Ok(Ok(None)) => Err("niri closed the connection".to_string()),
         Ok(Err(e)) => Err(format!("read failed: {e}")),
@@ -118,45 +103,46 @@ async fn send_on_connection(
 }
 
 pub async fn send_request(
-    request: Value,
-) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+    request: Request,
+) -> Result<Reply, Box<dyn std::error::Error + Send + Sync>> {
     let (reply_tx, reply_rx) = oneshot::channel();
     request_tx()
         .send((request, reply_tx))
         .map_err(|_| "niri request worker is not running")?;
 
     match reply_rx.await {
-        Ok(Ok(response)) => Ok(response),
+        Ok(Ok(reply)) => Ok(reply),
         Ok(Err(e)) => Err(e.into()),
         Err(_) => Err("niri request worker dropped the reply".into()),
     }
 }
 
 pub async fn focus_window(id: u64) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let request = json!({ "Action": { "FocusWindow": { "id": id } } });
-    let response = send_request(request).await?;
-    if response.get("Ok").is_some() {
-        Ok(())
-    } else {
-        Err(format!("Failed to focus window: {}", response).into())
+    let request = Request::Action(Action::FocusWindow { id });
+    match send_request(request).await? {
+        Ok(_) => Ok(()),
+        Err(e) => Err(format!("failed to focus window: {e}").into()),
     }
 }
 
 pub async fn spawn(command: String) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let request = json!({ "Action": { "Spawn": { "command": ["sh", "-c", command] } } });
-    let response = send_request(request).await?;
-    if response.get("Ok").is_some() {
-        Ok(())
-    } else {
-        Err(format!("Failed to spawn command: {}", response).into())
+    let request = Request::Action(Action::Spawn {
+        command: vec!["sh".to_string(), "-c".to_string(), command],
+    });
+    match send_request(request).await? {
+        Ok(_) => Ok(()),
+        Err(e) => Err(format!("failed to spawn command: {e}").into()),
     }
 }
 
 pub async fn event_stream(
-    tx: mpsc::UnboundedSender<NiriEvent>,
+    tx: mpsc::UnboundedSender<Event>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut stream = connect().await?;
-    stream.write_all(b"\"EventStream\"\n").await?;
+
+    let mut request_str = serde_json::to_string(&Request::EventStream)?;
+    request_str.push('\n');
+    stream.write_all(request_str.as_bytes()).await?;
 
     let (reader, _) = stream.into_split();
     let mut lines = BufReader::new(reader).lines();
@@ -164,94 +150,18 @@ pub async fn event_stream(
     lines.next_line().await?;
 
     while let Some(line) = lines.next_line().await? {
-        let value: Value = match serde_json::from_str(&line) {
-            Ok(v) => v,
+        let event = match serde_json::from_str::<Event>(&line) {
+            Ok(e) => e,
             Err(e) => {
                 log::warn!("Failed to parse event line: {e}");
                 continue;
             }
         };
 
-        if let Some(event) = parse_event(&value)
-            && tx.send(event).is_err()
-        {
+        if tx.send(event).is_err() {
             break;
         }
     }
 
     Ok(())
-}
-
-fn parse_event(v: &Value) -> Option<NiriEvent> {
-    if let Some(windows) = v
-        .get("WindowsChanged")
-        .and_then(|e| e.get("windows"))
-        .and_then(|w| w.as_array())
-    {
-        return Some(NiriEvent::WindowsChanged(
-            windows.iter().filter_map(parse_window).collect(),
-        ));
-    }
-
-    if let Some(w) = v.get("WindowOpenedOrChanged").and_then(|e| e.get("window")) {
-        return parse_window(w).map(NiriEvent::WindowOpenedOrChanged);
-    }
-
-    if let Some(id) = v
-        .get("WindowClosed")
-        .and_then(|e| e.get("id"))
-        .and_then(|i| i.as_u64())
-    {
-        return Some(NiriEvent::WindowClosed(id));
-    }
-
-    if let Some(e) = v.get("WindowFocusChanged") {
-        let id = e.get("id").and_then(|i| i.as_u64());
-        return Some(NiriEvent::WindowFocusChanged(id));
-    }
-
-    log::debug!("Unrecognized niri event, ignoring: {v}");
-    None
-}
-
-fn parse_window(w: &Value) -> Option<WindowInfo> {
-    let id = match w.get("id").and_then(|v| v.as_u64()) {
-        Some(v) => v,
-        None => {
-            log::warn!("Window entry missing/invalid `id`: {w}");
-            return None;
-        }
-    };
-    let title = match w.get("title").and_then(|v| v.as_str()) {
-        Some(v) => v.to_string(),
-        None => {
-            log::warn!("Window {id} missing/invalid `title`: {w}");
-            return None;
-        }
-    };
-    let app_id = match w.get("app_id").and_then(|v| v.as_str()) {
-        Some(v) => v.to_string(),
-        None => {
-            log::warn!("Window {id} missing/invalid `app_id`: {w}");
-            return None;
-        }
-    };
-    let focused = match w.get("is_focused").and_then(|v| v.as_bool()) {
-        Some(v) => v,
-        None => {
-            log::warn!("Window {id} missing/invalid `is_focused`: {w}");
-            return None;
-        }
-    };
-
-    if app_id == APP_ID {
-        return None;
-    }
-
-    Some(WindowInfo {
-        id,
-        title,
-        app_id,
-        focused,
-    })
 }

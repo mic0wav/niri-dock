@@ -5,9 +5,9 @@ mod layer_shell;
 use std::{fs::File, io::Read};
 
 use gtk::prelude::*;
+use niri_ipc_types::{Event, Window};
 use relm4::prelude::*;
 
-use crate::niri_ipc::NiriEvent;
 use icon_button::Action;
 
 use std::cell::RefCell;
@@ -43,7 +43,7 @@ pub enum Input {
     Leave,
     Focus(u64),
     Launch(String),
-    NiriEvent(NiriEvent),
+    NiriEvent(Event),
 }
 
 #[derive(Debug)]
@@ -203,23 +203,28 @@ impl SimpleComponent for DockModel {
                 self.indicator.emit(indicator::Input::Leave);
             }
             Input::NiriEvent(event) => match event {
-                NiriEvent::WindowsChanged(windows) => {
+                Event::WindowsChanged { windows } => {
                     ICON_CACHE.with(|c| c.borrow_mut().clear());
-                    self.focused_window = windows.iter().find(|w| w.focused).map(|w| w.id);
+                    let windows: Vec<Window> =
+                        windows.into_iter().filter(|w| !is_own_window(w)).collect();
+                    self.focused_window = windows.iter().find(|w| w.is_focused).map(|w| w.id);
                     let mut guard = self.apps.guard();
                     guard.clear();
                     for w in &windows {
                         guard.push_back((
-                            icon_name_for_app_id(&w.app_id),
+                            icon_name_for_app_id(&window_app_id(w)),
                             Action::Focus(w.id),
-                            w.focused,
-                            w.title.clone(),
+                            w.is_focused,
+                            window_title(w),
                         ));
                     }
                     drop(guard);
                     self.set_apps_count(windows.len());
                 }
-                NiriEvent::WindowOpenedOrChanged(w) => {
+                Event::WindowOpenedOrChanged { window: w } => {
+                    if is_own_window(&w) {
+                        return;
+                    }
                     let mut guard = self.apps.guard();
                     let existing = guard
                         .iter()
@@ -229,17 +234,17 @@ impl SimpleComponent for DockModel {
                             guard.send(
                                 index,
                                 icon_button::Input::Update {
-                                    icon_name: icon_name_for_app_id(&w.app_id),
-                                    title: w.title,
+                                    icon_name: icon_name_for_app_id(&window_app_id(&w)),
+                                    title: window_title(&w),
                                 },
                             );
                         }
                         None => {
                             guard.push_back((
-                                icon_name_for_app_id(&w.app_id),
+                                icon_name_for_app_id(&window_app_id(&w)),
                                 Action::Focus(w.id),
-                                w.focused,
-                                w.title,
+                                w.is_focused,
+                                window_title(&w),
                             ));
                         }
                     }
@@ -247,7 +252,7 @@ impl SimpleComponent for DockModel {
                     drop(guard);
                     self.set_apps_count(count);
                 }
-                NiriEvent::WindowClosed(id) => {
+                Event::WindowClosed { id } => {
                     if self.focused_window == Some(id) {
                         self.focused_window = None;
                     }
@@ -262,17 +267,17 @@ impl SimpleComponent for DockModel {
                     drop(guard);
                     self.set_apps_count(count);
                 }
-                NiriEvent::WindowFocusChanged(focused_id) => {
-                    if focused_id != self.focused_window {
-                        let guard = self.apps.guard();
-                        for index in 0..guard.len() {
-                            let id = guard.get(index).and_then(|i| i.window_id());
-                            if id == self.focused_window || id == focused_id {
-                                guard.send(index, icon_button::Input::SetFocused(id == focused_id));
-                            }
+                Event::WindowFocusChanged { id: focused_id }
+                    if focused_id != self.focused_window =>
+                {
+                    let guard = self.apps.guard();
+                    for index in 0..guard.len() {
+                        let id = guard.get(index).and_then(|i| i.window_id());
+                        if id == self.focused_window || id == focused_id {
+                            guard.send(index, icon_button::Input::SetFocused(id == focused_id));
                         }
-                        self.focused_window = focused_id;
                     }
+                    self.focused_window = focused_id;
                 }
             },
         }
@@ -312,9 +317,28 @@ fn load_launchables() -> Option<Launchables> {
     }
 }
 
+fn is_own_window(w: &Window) -> bool {
+    w.app_id.as_deref() == Some(crate::niri_ipc::APP_ID)
+}
+
+fn window_app_id(w: &Window) -> String {
+    w.app_id.clone().unwrap_or_default()
+}
+
+fn window_title(w: &Window) -> String {
+    w.title
+        .clone()
+        .or_else(|| w.app_id.clone())
+        .unwrap_or_default()
+}
+
 fn icon_name_for_app_id(app_id: &str) -> String {
     if let Some(cached) = ICON_CACHE.with(|c| c.borrow().get(app_id).cloned()) {
         return cached;
+    }
+
+    if app_id.is_empty() {
+        return "application-x-executable-symbolic".to_string();
     }
 
     let candidates = [
