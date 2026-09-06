@@ -59,7 +59,9 @@ impl SimpleComponent for IndicatorModel {
         match msg {
             Input::Enter => {
                 self.visible = false;
-                sender.output(Output::Enter).unwrap();
+                if let Err(e) = sender.output(Output::Enter) {
+                    log::error!("Input::Enter failed: {e:?}")
+                };
             }
             Input::Leave => {
                 self.visible = true;
