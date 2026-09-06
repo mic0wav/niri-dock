@@ -1,6 +1,6 @@
+mod config;
 mod dock;
 mod niri_ipc;
-mod config;
 
 use std::sync::OnceLock;
 use tokio::runtime::Runtime;
@@ -101,12 +101,14 @@ fn load_css() -> String {
     match std::fs::read_to_string(&path) {
         Ok(css) => css,
         Err(_) => {
-            if let Err(e) = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, DEFAULT_CSS)) {
+            if let Err(e) =
+                std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, DEFAULT_CSS))
+            {
                 log::warn!("Failed to write default CSS to {}: {e}", path.display());
             } else {
                 log::info!("Wrote default CSS to {}", path.display());
             }
-          DEFAULT_CSS.to_string()
+            DEFAULT_CSS.to_string()
         }
     }
 }

@@ -1,10 +1,10 @@
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::UnixStream;
+use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::{mpsc, oneshot};
 
 pub const APP_ID: &str = "org.niri.dock";
@@ -55,7 +55,7 @@ async fn request_worker(mut rx: mpsc::UnboundedReceiver<(Value, ReplyTx)>) {
     let max_backoff = Duration::from_secs(30);
 
     loop {
-       let stream = match connect().await {
+        let stream = match connect().await {
             Ok(s) => s,
             Err(e) => {
                 log::error!("REQ: connect failed: {e}");
@@ -70,8 +70,8 @@ async fn request_worker(mut rx: mpsc::UnboundedReceiver<(Value, ReplyTx)>) {
         let mut lines = BufReader::new(reader).lines();
 
         loop {
-           let Some((request, reply_tx)) = rx.recv().await else {
-               return;
+            let Some((request, reply_tx)) = rx.recv().await else {
+                return;
             };
 
             let result = send_on_connection(&mut writer, &mut lines, request).await;
@@ -117,7 +117,9 @@ async fn send_on_connection(
     }
 }
 
-pub async fn send_request(request: Value) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+pub async fn send_request(
+    request: Value,
+) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
     let (reply_tx, reply_rx) = oneshot::channel();
     request_tx()
         .send((request, reply_tx))
@@ -170,7 +172,9 @@ pub async fn event_stream(
             }
         };
 
-        if let Some(event) = parse_event(&value) && tx.send(event).is_err() {
+        if let Some(event) = parse_event(&value)
+            && tx.send(event).is_err()
+        {
             break;
         }
     }
@@ -244,5 +248,10 @@ fn parse_window(w: &Value) -> Option<WindowInfo> {
         return None;
     }
 
-    Some(WindowInfo { id, title, app_id, focused })
+    Some(WindowInfo {
+        id,
+        title,
+        app_id,
+        focused,
+    })
 }

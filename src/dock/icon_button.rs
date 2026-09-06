@@ -53,8 +53,17 @@ impl AsyncFactoryComponent for IconButtonModel {
         }
     }
 
-    async fn init_model(init: Self::Init, _index: &DynamicIndex, _sender: AsyncFactorySender<Self>) -> Self {
-        Self { icon_name: init.0, action: init.1, focused: init.2, title: init.3 }
+    async fn init_model(
+        init: Self::Init,
+        _index: &DynamicIndex,
+        _sender: AsyncFactorySender<Self>,
+    ) -> Self {
+        Self {
+            icon_name: init.0,
+            action: init.1,
+            focused: init.2,
+            title: init.3,
+        }
     }
 
     async fn update(&mut self, msg: Self::Input, sender: AsyncFactorySender<Self>) {

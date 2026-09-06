@@ -7,8 +7,8 @@ use std::{fs::File, io::Read};
 use gtk::prelude::*;
 use relm4::prelude::*;
 
-use icon_button::Action;
 use crate::niri_ipc::NiriEvent;
+use icon_button::Action;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -186,7 +186,7 @@ impl SimpleComponent for DockModel {
 
         match msg {
             Input::Launch(x) => {
-                if let Err(e) =  sender.output(Output::Launch(x)) {
+                if let Err(e) = sender.output(Output::Launch(x)) {
                     log::error!("Failed to forward launch output: {e:?}");
                 }
             }
@@ -221,13 +221,18 @@ impl SimpleComponent for DockModel {
                 }
                 NiriEvent::WindowOpenedOrChanged(w) => {
                     let mut guard = self.apps.guard();
-                    let existing = guard.iter().position(|item| item.and_then(|i| i.window_id()) == Some(w.id));
+                    let existing = guard
+                        .iter()
+                        .position(|item| item.and_then(|i| i.window_id()) == Some(w.id));
                     match existing {
                         Some(index) => {
-                            guard.send(index, icon_button::Input::Update {
-                                icon_name: icon_name_for_app_id(&w.app_id),
-                                title: w.title,
-                            });
+                            guard.send(
+                                index,
+                                icon_button::Input::Update {
+                                    icon_name: icon_name_for_app_id(&w.app_id),
+                                    title: w.title,
+                                },
+                            );
                         }
                         None => {
                             guard.push_back((
@@ -247,7 +252,8 @@ impl SimpleComponent for DockModel {
                         self.focused_window = None;
                     }
                     let mut guard = self.apps.guard();
-                    let index = guard.iter()
+                    let index = guard
+                        .iter()
                         .position(|item| item.and_then(|i| i.window_id()) == Some(id));
                     if let Some(index) = index {
                         guard.remove(index);
@@ -268,7 +274,7 @@ impl SimpleComponent for DockModel {
                         self.focused_window = focused_id;
                     }
                 }
-            }
+            },
         }
     }
 }
@@ -323,7 +329,7 @@ fn icon_name_for_app_id(app_id: &str) -> String {
             && let Some(name) = icon.to_string()
         {
             resolved = name.to_string();
-            break
+            break;
         }
     }
 
