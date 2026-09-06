@@ -6,7 +6,7 @@ This is a simple dock made in rust for niri, it uses gtk4 and layer-shell
 
 ## installing and running
 
-```
+```shell
 $ git clone https://github.com/mic0wav/niri-dock --depth=1
 $ cd niri-dock
 
@@ -20,7 +20,7 @@ $ cargo install --path . # for user wide installation
 
 ## pre commit
 
-```
+```shell
 $ cargo fmt
 $ cargo clippy
 $ cargo test
@@ -29,3 +29,15 @@ $ cargo test
 ## configuration
 
 Place config.toml and dock.css in XDG-CONFIG-HOME/dock or in ~/.config/dock
+
+```toml
+[launchables.firefox]
+icon = "firefox"
+command = "firefox"
+
+[launchables.terminal]
+icon = "Terminal"
+command = "alacritty"
+```
+
+!TODO: they appear sorted alphabetically by name, not in any custom order. fix this

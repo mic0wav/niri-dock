@@ -1,2 +1,11 @@
-icons = ["firefox", "Terminal", "nvim"]
-commands = ["firefox", "alacritty", "alacritty -e nvim"]
+[launchables.firefox]
+icon = "firefox"
+command = "firefox"
+
+[launchables.terminal]
+icon = "Terminal"
+command = "alacritty"
+
+[launchables.neovim]
+icon = "nvim"
+command = "alacritty -e nvim"

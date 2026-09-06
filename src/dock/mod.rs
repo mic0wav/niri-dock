@@ -16,9 +16,15 @@ thread_local! {
 }
 
 #[derive(serde::Deserialize, Clone)]
-struct Launchables {
-    icons: Vec<String>,
-    commands: Vec<String>,
+struct Launchable {
+    icon: String,
+    command: String,
+}
+
+#[derive(serde::Deserialize, Clone, Default)]
+struct Config {
+    #[serde(default)]
+    launchables: std::collections::BTreeMap<String, Launchable>,
 }
 
 #[tracker::track]
@@ -104,22 +110,13 @@ impl SimpleComponent for DockModel {
                 icon_button::Output::Focus(x) => Input::Focus(x),
                 icon_button::Output::Launch(x) => Input::Launch(x),
             });
-        if let Some(x) = load_launchables() {
-            if x.icons.len() != x.commands.len() {
-                log::warn!(
-                    "config.toml: `icons` has {} entries but `commands` has {}",
-                    x.icons.len(),
-                    x.commands.len()
-                );
-            }
-            for (icon, command) in x.icons.iter().zip(x.commands.iter()) {
-                launchables.guard().push_back((
-                    icon.to_owned(),
-                    Action::Launch(command.clone()),
-                    false,
-                    icon.to_owned(),
-                ));
-            }
+        for (name, launchable) in load_config().launchables {
+            launchables.guard().push_back((
+                launchable.icon,
+                Action::Launch(launchable.command),
+                false,
+                name,
+            ));
         }
 
         let indicator_builder = indicator::IndicatorModel::builder();
@@ -299,10 +296,10 @@ fn window_index(
         .position(|item| item.and_then(|i| i.window_id()) == Some(id))
 }
 
-fn load_launchables() -> Option<Launchables> {
+fn load_config() -> Config {
     let Some(dir) = crate::config::dir() else {
         log::error!("Failed to find config directory.");
-        return None;
+        return Config::default();
     };
     let path = dir.join("config.toml");
 
@@ -310,15 +307,15 @@ fn load_launchables() -> Option<Launchables> {
         Ok(contents) => contents,
         Err(e) => {
             log::warn!("No config found at {}: {e}", path.display());
-            return None;
+            return Config::default();
         }
     };
 
     match toml::from_str(&contents) {
-        Ok(x) => Some(x),
+        Ok(config) => config,
         Err(e) => {
             log::error!("Failed to parse config: {e}");
-            None
+            Config::default()
         }
     }
 }
