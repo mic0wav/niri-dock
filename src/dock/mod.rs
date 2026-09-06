@@ -1,4 +1,5 @@
 mod icon_button;
+mod icon_cache;
 mod indicator;
 mod layer_shell;
 
@@ -7,13 +8,6 @@ use niri_ipc_types::{Event, Window};
 use relm4::prelude::*;
 
 use icon_button::Action;
-
-use std::cell::RefCell;
-use std::collections::HashMap;
-
-thread_local! {
-    static ICON_CACHE: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
-}
 
 #[derive(serde::Deserialize, Clone)]
 struct Launchable {
@@ -220,7 +214,7 @@ impl SimpleComponent for DockModel {
 
 impl DockModel {
     fn replace_all_apps(&mut self, windows: Vec<Window>) {
-        ICON_CACHE.with(|c| c.borrow_mut().clear());
+        icon_cache::clear();
         let windows: Vec<Window> = windows.into_iter().filter(|w| !is_own_window(w)).collect();
         self.focused_window = windows.iter().find(|w| w.is_focused).map(|w| w.id);
 
@@ -228,7 +222,7 @@ impl DockModel {
         guard.clear();
         for w in &windows {
             guard.push_back((
-                icon_name_for_app_id(&window_app_id(w)),
+                icon_cache::icon_name_for_app_id(&window_app_id(w)),
                 Action::Focus(w.id),
                 w.is_focused,
                 window_title(w),
@@ -245,14 +239,14 @@ impl DockModel {
                 guard.send(
                     index,
                     icon_button::Input::Update {
-                        icon_name: icon_name_for_app_id(&window_app_id(w)),
+                        icon_name: icon_cache::icon_name_for_app_id(&window_app_id(w)),
                         title: window_title(w),
                     },
                 );
             }
             None => {
                 guard.push_back((
-                    icon_name_for_app_id(&window_app_id(w)),
+                    icon_cache::icon_name_for_app_id(&window_app_id(w)),
                     Action::Focus(w.id),
                     w.is_focused,
                     window_title(w),
@@ -333,33 +327,4 @@ fn window_title(w: &Window) -> String {
         .clone()
         .or_else(|| w.app_id.clone())
         .unwrap_or_default()
-}
-
-fn icon_name_for_app_id(app_id: &str) -> String {
-    if let Some(cached) = ICON_CACHE.with(|c| c.borrow().get(app_id).cloned()) {
-        return cached;
-    }
-
-    if app_id.is_empty() {
-        return "application-x-executable-symbolic".to_string();
-    }
-
-    let candidates = [
-        format!("{app_id}.desktop"),
-        format!("{}.desktop", app_id.to_lowercase()),
-    ];
-
-    let mut resolved = app_id.to_string();
-    for desktop_id in candidates {
-        if let Some(info) = gtk::gio::DesktopAppInfo::new(&desktop_id)
-            && let Some(icon) = info.icon()
-            && let Some(name) = icon.to_string()
-        {
-            resolved = name.to_string();
-            break;
-        }
-    }
-
-    ICON_CACHE.with(|c| c.borrow_mut().insert(app_id.to_string(), resolved.clone()));
-    resolved
 }
