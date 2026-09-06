@@ -72,21 +72,23 @@ fn request_tx() -> &'static mpsc::UnboundedSender<(Request, ReplyTx)> {
 }
 
 async fn request_worker(mut rx: mpsc::UnboundedReceiver<(Request, ReplyTx)>) {
-    let mut backoff = Duration::from_secs(1);
-    let max_backoff = Duration::from_secs(30);
+    let mut backoff = crate::backoff::Backoff::new(
+        Duration::from_secs(1),
+        Duration::from_secs(30),
+        Duration::from_secs(10),
+    );
 
     loop {
+        let started = std::time::Instant::now();
         let stream = match connect().await {
             Ok(s) => s,
             Err(e) => {
                 log::error!("REQ: connect failed: {e}");
-                tokio::time::sleep(backoff).await;
-                backoff = std::cmp::min(backoff * 2, max_backoff);
+                tokio::time::sleep(backoff.advance(started.elapsed())).await;
                 continue;
             }
         };
 
-        let started = std::time::Instant::now();
         let (reader, mut writer) = stream.into_split();
         let mut lines = BufReader::new(reader).lines();
 
@@ -107,12 +109,7 @@ async fn request_worker(mut rx: mpsc::UnboundedReceiver<(Request, ReplyTx)>) {
             }
         }
 
-        backoff = if started.elapsed() > Duration::from_secs(10) {
-            Duration::from_secs(1)
-        } else {
-            std::cmp::min(backoff * 2, max_backoff)
-        };
-        tokio::time::sleep(backoff).await;
+        tokio::time::sleep(backoff.advance(started.elapsed())).await;
     }
 }
 

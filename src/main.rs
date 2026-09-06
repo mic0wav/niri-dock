@@ -1,3 +1,4 @@
+mod backoff;
 mod config;
 mod dock;
 mod niri_ipc;
