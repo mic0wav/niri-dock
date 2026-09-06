@@ -279,6 +279,7 @@ impl SimpleComponent for DockModel {
                     }
                     self.focused_window = focused_id;
                 }
+                _ => {}
             },
         }
     }
