@@ -179,6 +179,7 @@ dependencies = [
  "relm4",
  "serde",
  "serde_json",
+ "thiserror",
  "tokio",
  "toml 0.8.23",
  "tracker",
