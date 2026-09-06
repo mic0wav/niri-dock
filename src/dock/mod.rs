@@ -2,8 +2,6 @@ mod icon_button;
 mod indicator;
 mod layer_shell;
 
-use std::{fs::File, io::Read};
-
 use gtk::prelude::*;
 use niri_ipc_types::{Event, Window};
 use relm4::prelude::*;
@@ -292,24 +290,15 @@ fn load_launchables() -> Option<Launchables> {
     };
     let path = dir.join("config.toml");
 
-    let mut file = match File::open(&path) {
-        Ok(x) => x,
+    let contents = match std::fs::read_to_string(&path) {
+        Ok(contents) => contents,
         Err(e) => {
             log::warn!("No config found at {}: {e}", path.display());
             return None;
         }
     };
 
-    let mut buf = String::new();
-    match file.read_to_string(&mut buf) {
-        Ok(_) => (),
-        Err(e) => {
-            log::error!("Failed to read config: {e}");
-            return None;
-        }
-    }
-
-    match toml::from_str(&buf) {
+    match toml::from_str(&contents) {
         Ok(x) => Some(x),
         Err(e) => {
             log::error!("Failed to parse config: {e}");
