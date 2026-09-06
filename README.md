@@ -18,7 +18,13 @@ $ ./target/release/dock # for the optimized binary
 $ cargo install --path . # for user wide installation
 ```
 
+## pre commit
 
+```
+$ cargo fmt
+$ cargo clippy
+$ cargo test
+```
 
 ## configuration
 
