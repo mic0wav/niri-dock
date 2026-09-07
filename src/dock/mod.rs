@@ -139,25 +139,7 @@ impl SimpleComponent for DockModel {
         layer_shell::anchor_bottom(&widgets.window);
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        crate::runtime().spawn(async move {
-            let mut backoff = crate::backoff::Backoff::new(
-                std::time::Duration::from_secs(1),
-                std::time::Duration::from_secs(30),
-                std::time::Duration::from_secs(10),
-            );
-            loop {
-                let started = std::time::Instant::now();
-                if let Err(e) = crate::niri_ipc::event_stream(tx.clone()).await {
-                    log::error!("Niri event stream ended: {e}");
-                } else {
-                    log::warn!("Niri event stream closed cleanly");
-                }
-
-                let delay = backoff.advance(started.elapsed());
-                log::info!("Reconnecting to niri in {delay:?}");
-                tokio::time::sleep(delay).await;
-            }
-        });
+        crate::runtime().spawn(crate::niri_ipc::watch_events(tx));
 
         let sender_clone = sender.clone();
         crate::runtime().spawn(async move {
@@ -291,19 +273,8 @@ fn window_index(
 }
 
 fn load_config() -> Config {
-    let Some(dir) = crate::config::dir() else {
-        log::error!("Failed to find config directory.");
-        return Config::default();
-    };
-    let path = dir.join("config.toml");
-
-    let contents = match std::fs::read_to_string(&path) {
-        Ok(contents) => contents,
-        Err(e) => {
-            log::warn!("No config found at {}: {e}", path.display());
-            return Config::default();
-        }
-    };
+    const DEFAULT_CONFIG: &str = include_str!("../../resources/config.toml");
+    let contents = crate::config::read_or_seed_default("config.toml", DEFAULT_CONFIG);
 
     match toml::from_str(&contents) {
         Ok(config) => config,

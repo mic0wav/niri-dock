@@ -91,25 +91,5 @@ fn main() {
 
 fn load_css() -> String {
     const DEFAULT_CSS: &str = include_str!("../resources/dock.css");
-
-    let Some(dir) = config::dir() else {
-        log::warn!("Could not resolve config directory, using bundled default CSS.");
-        return DEFAULT_CSS.to_string();
-    };
-
-    let path = dir.join("dock.css");
-
-    match std::fs::read_to_string(&path) {
-        Ok(css) => css,
-        Err(_) => {
-            if let Err(e) =
-                std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, DEFAULT_CSS))
-            {
-                log::warn!("Failed to write default CSS to {}: {e}", path.display());
-            } else {
-                log::info!("Wrote default CSS to {}", path.display());
-            }
-            DEFAULT_CSS.to_string()
-        }
-    }
+    config::read_or_seed_default("dock.css", DEFAULT_CSS)
 }

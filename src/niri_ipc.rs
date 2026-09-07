@@ -72,11 +72,7 @@ fn request_tx() -> &'static mpsc::UnboundedSender<(Request, ReplyTx)> {
 }
 
 async fn request_worker(mut rx: mpsc::UnboundedReceiver<(Request, ReplyTx)>) {
-    let mut backoff = crate::backoff::Backoff::new(
-        Duration::from_secs(1),
-        Duration::from_secs(30),
-        Duration::from_secs(10),
-    );
+    let mut backoff = crate::backoff::Backoff::niri_default();
 
     loop {
         let started = std::time::Instant::now();
@@ -158,6 +154,21 @@ pub async fn spawn(command: String) -> Result<()> {
     }))
     .await?;
     Ok(())
+}
+
+pub async fn watch_events(tx: mpsc::UnboundedSender<Event>) {
+    let mut backoff = crate::backoff::Backoff::niri_default();
+    loop {
+        let started = std::time::Instant::now();
+        match event_stream(tx.clone()).await {
+            Ok(()) => log::warn!("Niri event stream closed cleanly"),
+            Err(e) => log::error!("Niri event stream ended: {e}"),
+        }
+
+        let delay = backoff.advance(started.elapsed());
+        log::info!("Reconnecting to niri in {delay:?}");
+        tokio::time::sleep(delay).await;
+    }
 }
 
 pub async fn event_stream(tx: mpsc::UnboundedSender<Event>) -> Result<()> {
